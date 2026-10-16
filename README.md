@@ -44,3 +44,38 @@ OEM battery-manager steps and the `capabilities.json` report: [`docs/DEVICES.md`
 All available motion/environment sensors (incl. proximity) feed the service journal; an adaptive
 DSP engine gate and a hand-weighted (not trained) event classifier reject transient noise.
 Details, test output and what a real TFLite implementation would need: [`docs/AI_FILTERING.md`](docs/AI_FILTERING.md).
+
+## CI: manual pre-release workflow
+[`.github/workflows/prerelease.yml`](.github/workflows/prerelease.yml) – trigger only via
+**Actions → "Pre-release APK (manual)" → Run workflow** (`workflow_dispatch`). It checks out the
+repo, runs `scripts/build.sh` (tests → decode → patch → helpers → build → zipalign → sign), signs
+with the universal key from secrets, and publishes a GitHub **pre-release** `v1.1.7-Mk1-pocketfix-ci.<run>`
+with the APK and its SHA-256. `versionCode = 100 + run number`, so every workflow build is newer
+than the previous one.
+
+## Universal signing key
+* Keystore: PKCS12, RSA 4096, SHA384withRSA, validity 10000 days (until 2054-03-03),
+  alias `atv-observer-universal`, certificate SHA-256
+  `14:69:38:1E:81:B7:4E:F2:21:07:9D:04:F3:F6:3D:9F:A3:64:86:47:22:DA:93:B9:54:EB:93:14:0C:58:34:F4`.
+* Stored **only** as GitHub Actions repository secrets (never in git):
+  `SIGNING_KEYSTORE_BASE64`, `SIGNING_KEYSTORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`.
+  `.gitignore` blocks `*.jks`, `*.keystore`, `*.p12`, `keystore.b64`, `signing.env`.
+* GitHub secrets cannot be read back. Keep an offline backup of the keystore + passwords; if the
+  key is lost, future builds can no longer update installed copies.
+
+### Installing (important)
+The original APK is signed with an Android **debug** certificate
+(`CN=Android Debug`, SHA-256 `f182cb4a…b749f`) whose private key is not available. Android refuses
+to update an app with a different signing certificate, so:
+
+1. **First universal-key build: uninstall the old J3 ATV Observer first** (this deletes its local
+   ride database – export rides via the app's CSV export before uninstalling if you need them).
+2. Install the pre-release APK.
+3. All later builds from the workflow are signed with the same universal key and **update in place**
+   (data kept), because the certificate matches and `versionCode` increases.
+
+## Verification status
+Static checks only: the APK rebuilds, zipaligns, `apksigner verify` passes (v2+v3), `aapt2 dump
+badging` parses it, `tools/verify_refs.py` resolves every cross-boundary smali reference, and the
+filter's host unit tests pass. **It has not been installed or run on any physical device**
+(Galaxy J3 / A71 / S22 / Razr 40) or emulator.
