@@ -58,13 +58,16 @@ fi
 BT="$TOOLS_DIR/build-tools"
 APKTOOL=(java -Xmx3g -jar "$TOOLS_DIR/apktool.jar")
 
-# ------------------------------------------------------------------ host unit tests (pure-Java filter)
+# ------------------------------------------------------------------ host unit tests (pure-Java logic)
 echo "[0/6] host unit tests"
 mkdir -p "$ROOT/build-test"
 javac -nowarn -d "$ROOT/build-test" src/java/com/cgs/atvobserver/patch/AdaptiveEventFilter.java \
-  src/java/com/cgs/atvobserver/patch/RideRecord.java tests/FilterTest.java tests/RecorderTest.java
+  src/java/com/cgs/atvobserver/patch/RideRecord.java \
+  src/java/com/cgs/atvobserver/patch/ReleaseJson.java src/java/com/cgs/atvobserver/patch/ReleaseUpdater.java \
+  tests/FilterTest.java tests/RecorderTest.java tests/UpdaterTest.java
 java -cp "$ROOT/build-test" FilterTest | tail -1
 java -cp "$ROOT/build-test" RecorderTest | tail -1
+java -cp "$ROOT/build-test" UpdaterTest | tail -1
 
 # ------------------------------------------------------------------ decode + patch
 rm -rf "$BUILD"
