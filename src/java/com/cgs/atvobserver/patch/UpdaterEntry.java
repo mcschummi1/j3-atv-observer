@@ -28,6 +28,10 @@ public final class UpdaterEntry {
         if (activity == null) return "Catalin Garage Standard (CGS) - tap to check for updates";
         try {
             android.content.pm.PackageInfo p = activity.getPackageManager().getPackageInfo(activity.getPackageName(), 0);
+            if (Variant.isDiag(activity.getPackageName())) {
+                label = "DIAG build " + p.versionName + " (Build " + p.getLongVersionCode() + ", " + activity.getPackageName() + ")\nUpdater disabled in this diagnostic copy";
+                return label;
+            }
             label = "Catalin Garage Standard (CGS) v" + p.versionName + " (Build " + p.getLongVersionCode() + ")\nTap here to check for updates";
             return label;
         } catch (Exception e) { return "Catalin Garage Standard (CGS) - tap to check for updates"; }

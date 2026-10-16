@@ -74,6 +74,12 @@ public final class UpdateActivity extends Activity {
         ScrollView scroll = new ScrollView(this); scroll.addView(content); setContentView(scroll);
         primary.setOnClickListener(v -> action());
         secondary.setOnClickListener(v -> cancel());
+        if (Variant.isDiag(getPackageName())) { // side-by-side DIAG build: never talk to GitHub, never install anything
+            description.setText(Variant.UPDATER_DISABLED_TEXT + "\n\n" + installedLabel() + "\nPackage: " + getPackageName());
+            primary.setText("Updater disabled (DIAG build)"); primary.setEnabled(false);
+            secondary.setVisibility(android.view.View.GONE); progress.setVisibility(android.view.View.GONE);
+            return;
+        }
         // A process restart safely discards any old uncommitted download; it never resumes an install from disk.
         File dir = new File(getCacheDir(), "updater");
         if (dir.isDirectory()) {
