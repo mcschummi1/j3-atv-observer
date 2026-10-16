@@ -63,11 +63,12 @@ echo "[0/6] host unit tests"
 mkdir -p "$ROOT/build-test"
 javac -nowarn -d "$ROOT/build-test" src/java/com/cgs/atvobserver/patch/AdaptiveEventFilter.java \
   src/java/com/cgs/atvobserver/patch/RideRecord.java \
-  src/java/com/cgs/atvobserver/patch/ReleaseJson.java src/java/com/cgs/atvobserver/patch/ReleaseUpdater.java \
-  tests/FilterTest.java tests/RecorderTest.java tests/UpdaterTest.java
+  src/java/com/cgs/atvobserver/patch/ReleaseJson.java src/java/com/cgs/atvobserver/patch/ReleaseUpdater.java src/java/com/cgs/atvobserver/patch/UpdateClient.java \
+  tests/FilterTest.java tests/RecorderTest.java tests/UpdaterTest.java tests/UpdateClientTest.java
 java -cp "$ROOT/build-test" FilterTest | tail -1
 java -cp "$ROOT/build-test" RecorderTest | tail -1
 java -cp "$ROOT/build-test" UpdaterTest | tail -1
+java -cp "$ROOT/build-test" UpdateClientTest | tail -1
 
 # ------------------------------------------------------------------ decode + patch
 rm -rf "$BUILD"

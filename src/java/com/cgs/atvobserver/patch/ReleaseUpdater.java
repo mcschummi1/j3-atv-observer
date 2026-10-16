@@ -76,6 +76,8 @@ public final class ReleaseUpdater {
     public static final class Parsed {
         public final List<Candidate> candidates = new ArrayList<>();
         public final List<String> skipped = new ArrayList<>();
+        /** Entries in the API page (used for pagination: a full page of 100 means "ask for the next one"). */
+        public int releaseCount;
     }
 
     // ------------------------------------------------------------------ versionCode rule
@@ -110,6 +112,7 @@ public final class ReleaseUpdater {
             throw new IOException("Unexpected GitHub response: " + why);
         }
         Parsed out = new Parsed();
+        out.releaseCount = ((List<Object>) root).size();
         for (Object o : (List<Object>) root) {
             if (!(o instanceof Map)) continue;
             Map<String, Object> r = (Map<String, Object>) o;
@@ -142,6 +145,7 @@ public final class ReleaseUpdater {
             }
             Object size = apk.get("size");
             long apkSize = size instanceof Long ? (Long) size : -1;
+            if (apkSize <= 0 || apkSize > MAX_APK_BYTES) { out.skipped.add(tag + ": APK size missing or above the " + (MAX_APK_BYTES >> 20) + " MB limit"); continue; }
             String digest = apk.get("digest") == null ? null : str(apk.get("digest")).toLowerCase(Locale.ROOT);
             if (digest != null && !digest.matches("sha256:[0-9a-f]{64}")) digest = null;
             out.candidates.add(new Candidate(tag, str(r.get("name")), str(r.get("html_url")), str(r.get("body")),
