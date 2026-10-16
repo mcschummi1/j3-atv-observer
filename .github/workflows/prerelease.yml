@@ -43,9 +43,10 @@ jobs:
       - name: Compute version
         id: ver
         run: |
-          # versionCode must grow with every build so updates install over each other.
-          echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
-          echo "name=1.1.7-Mk1-pocketfix-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          # Owner-pinned release version: versionName 1.1.7, versionCode 17.
+          # Any future build MUST bump these (versionCode has to grow to install over this one).
+          echo "code=17" >> "$GITHUB_OUTPUT"
+          echo "name=1.1.7" >> "$GITHUB_OUTPUT"
 
       - name: Restore universal signing key from secrets
         env:
