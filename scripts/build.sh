@@ -61,8 +61,10 @@ APKTOOL=(java -Xmx3g -jar "$TOOLS_DIR/apktool.jar")
 # ------------------------------------------------------------------ host unit tests (pure-Java filter)
 echo "[0/6] host unit tests"
 mkdir -p "$ROOT/build-test"
-javac -nowarn -d "$ROOT/build-test" src/java/com/cgs/atvobserver/patch/AdaptiveEventFilter.java tests/FilterTest.java
+javac -nowarn -d "$ROOT/build-test" src/java/com/cgs/atvobserver/patch/AdaptiveEventFilter.java \
+  src/java/com/cgs/atvobserver/patch/RideRecord.java tests/FilterTest.java tests/RecorderTest.java
 java -cp "$ROOT/build-test" FilterTest | tail -1
+java -cp "$ROOT/build-test" RecorderTest | tail -1
 
 # ------------------------------------------------------------------ decode + patch
 rm -rf "$BUILD"

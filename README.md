@@ -29,12 +29,34 @@ KEYSTORE_FILE=... KEYSTORE_PASSWORD=... KEY_ALIAS=... KEY_PASSWORD=... ./scripts
 ```
 Pipeline: `apktool d` → `patch -p1 < patches/*.patch` → compile `src/java` (against
 `src/stubs` + android.jar) with javac/d8 → baksmali into `smali_classes17` → `apktool b` →
-`zipalign -p 4` → `apksigner` (v2+v3) → `tools/verify_refs.py` static link check.
+`zipalign -p 4` → `apksigner` → `tools/verify_refs.py` static link check.
+Signature scheme: the output carries a **v3 signature only** (`apksigner verify`: v2 = false,
+v3 = true). `apksigner` is invoked with `--min-sdk-version 28`, and for API 28+ it omits the v2
+block. This is fine for every target device (Galaxy J3 Android 9 = API 28, A71, S22, Razr 40 are all
+API 28+, and API 28 is where v3 support starts); the APK would not install on API < 28, which
+`minSdk 28` excludes anyway.
 Tools (apktool 2.12.0, build-tools 34, android-34 android.jar, baksmali 3.0.3) are downloaded to
 `.tools/` on first run.
 
 Ride journals are written to `Android/data/com.cgs.atvobserver/files/ride_journal/*.csv`
 (readable over USB / `adb pull`).
+
+## Ride profile fix (CGS Stage 1, slice A)
+Rides inserted by the service journal (`PocketRecorder`) - both the "app closed before End Ride"
+path and crash recovery of orphan journals - previously hard-coded `vehicleType="ATV"`,
+`weatherCondition="Normal Dry"` and `estimatedFuelUsedL=0`. Now:
+* the profile active in `cgs_atv_config/active_vehicle` **at ride start** is written into the
+  journal header (`#J3ATV-JOURNAL v1 mode=POCKET vehicle=DAELIM ...`, an extra key=value token;
+  the 32 data columns are unchanged and older readers still parse `mode=`) and used for the
+  `ride_logs` row. Journals written before this fix have no `vehicle=` token; their recovery falls
+  back to the profile active at recovery time and says so in `terrainSummary`.
+* `weatherCondition` is `"Unknown"` (the column is free `TEXT NOT NULL`; the UI only displays it).
+* `estimatedFuelUsedL` stays `0.0` because the frozen v5 column is `REAL NOT NULL` (no NULL
+  possible without a schema change); `terrainSummary` carries `fuel=unknown weather=unknown` so it
+  cannot be mistaken for a measured 0 L.
+* The Android-free logic lives in `src/java/.../patch/RideRecord.java` and is covered by
+  `tests/RecorderTest.java` (Daelim orphan recovery, legacy journal, no duplicate after `#END`).
+  `scripts/build.sh` step 0 runs both host tests.
 
 ## Device compatibility (step 3)
 Runtime capability detection for Galaxy J3 (Android 9) / A71 (rooted) / S22 / Razr 40 (Android 16),
@@ -75,7 +97,7 @@ to update an app with a different signing certificate, so:
    (data kept), because the certificate matches and `versionCode` increases.
 
 ## Verification status
-Static checks only: the APK rebuilds, zipaligns, `apksigner verify` passes (v2+v3), `aapt2 dump
+Static checks only: the APK rebuilds, zipaligns, `apksigner verify` passes (v3 scheme; see Building), `aapt2 dump
 badging` parses it, `tools/verify_refs.py` resolves every cross-boundary smali reference, and the
 filter's host unit tests pass. **It has not been installed or run on any physical device**
 (Galaxy J3 / A71 / S22 / Razr 40) or emulator.

@@ -55,6 +55,7 @@ public final class PocketRecorder {
 
     // session state (only touched on the recorder thread)
     private String sessionMode;
+    private String sessionVehicle;   // active vehicle profile at ride start (cgs_atv_config/active_vehicle)
     private File sessionFile;
     private BufferedWriter out;
     private long sessionStartWall;
@@ -131,14 +132,14 @@ public final class PocketRecorder {
     }
 
     private void beginSession(String mode) {
+        sessionVehicle = activeVehicle();
         try {
             File dir = journalDir();
             String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
             sessionFile = new File(dir, "ride_" + mode.toLowerCase(Locale.US) + "_" + stamp + ".csv");
             out = new BufferedWriter(new FileWriter(sessionFile, true));
-            out.write("#J3ATV-JOURNAL v1 mode=" + mode + " fgsTypes=0x" + Integer.toHexString(sFgsTypes)
-                    + " sdk=" + android.os.Build.VERSION.SDK_INT + " device=" + android.os.Build.MANUFACTURER
-                    + "/" + android.os.Build.MODEL + "\n");
+            out.write(RideRecord.journalHeader(mode, sessionVehicle, sFgsTypes, android.os.Build.VERSION.SDK_INT,
+                    android.os.Build.MANUFACTURER + "/" + android.os.Build.MODEL) + "\n");
             out.write(header() + "\n");
             out.flush();
         } catch (Exception e) {
@@ -184,11 +185,12 @@ public final class PocketRecorder {
             Log.w(TAG, "journal close failed", e);
         }
         if (insertIntoDb) {
-            insertRide(sessionMode, stats, "Pocket journal (app closed before End Ride) | " + stats.filterSummary);
+            insertRide(sessionMode, sessionVehicle, stats, "Pocket journal (app closed before End Ride) | " + stats.filterSummary);
         }
         Log.i(TAG, "ride session ended (" + reason + "): " + stats.summaryLine());
         out = null;
         sessionMode = null;
+        sessionVehicle = null;
         sessionFile = null;
         releaseWakeLock();
     }
@@ -332,140 +334,76 @@ public final class PocketRecorder {
         return dir;
     }
 
+    /** Active vehicle profile, read with the same key/default as the original AppConfigManager. */
+    String activeVehicle() {
+        try {
+            return RideRecord.normalizeVehicle(app.getSharedPreferences(RideRecord.PREFS, Context.MODE_PRIVATE)
+                    .getString(RideRecord.KEY_ACTIVE_VEHICLE, "ATV"));
+        } catch (Exception e) {
+            Log.w(TAG, "cannot read active vehicle", e);
+            return "ATV";
+        }
+    }
+
     private void recoverOrphans() {
         File[] files = journalDir().listFiles();
         if (files == null) return;
         for (File f : files) {
             if (!f.getName().endsWith(".csv")) continue;
             try {
-                String mode = "POCKET";
-                String last = null;
-                RideStats s = new RideStats();
                 BufferedReader r = new BufferedReader(new FileReader(f));
-                String line;
-                while ((line = r.readLine()) != null) {
-                    if (line.startsWith("#J3ATV-JOURNAL")) {
-                        int i = line.indexOf("mode=");
-                        if (i >= 0) mode = line.substring(i + 5).split(" ")[0];
-                    } else if (!line.startsWith("#") && !line.startsWith("t_ms")) {
-                        s.addCsv(line);
-                    }
-                    last = line;
+                RideRecord.Parsed p;
+                try { p = RideRecord.parseJournal(r); } finally { r.close(); }
+                if (p.ended) continue;
+                RideRecord.JournalSummary s = p.summary;
+                String vehicle = RideRecord.recoveredVehicle(p, activeVehicle());
+                if (s.samples > 0) {
+                    insertRide(p.mode, vehicle, s, "Recovered pocket journal (process was killed)"
+                            + (p.headerVehicle == null ? " | vehicle=active-at-recovery (legacy journal)" : ""));
                 }
-                r.close();
-                if (last != null && last.startsWith("#END")) continue;
-                if (s.samples > 0) insertRide(mode, s, "Recovered pocket journal (process was killed)");
                 BufferedWriter w = new BufferedWriter(new FileWriter(f, true));
-                w.write("#END reason=recovered rows=" + s.samples + " " + s.summaryLine() + "\n");
+                w.write("#END reason=recovered rows=" + s.samples + " vehicle=" + vehicle + " " + s.summaryLine() + "\n");
                 w.close();
-                Log.i(TAG, "recovered orphan journal " + f.getName() + ": " + s.summaryLine());
+                Log.i(TAG, "recovered orphan journal " + f.getName() + ": " + vehicle + " " + s.summaryLine());
             } catch (Exception e) {
                 Log.w(TAG, "recovery failed for " + f, e);
             }
         }
     }
 
-    private void insertRide(String mode, RideStats s, String note) {
+    private void insertRide(String mode, String vehicle, RideRecord.JournalSummary s, String note) {
         if (s.samples < 5) {
             Log.i(TAG, "not inserting ride: only " + s.samples + " samples");
             return;
         }
         try {
             AppDatabase db = AppDatabase.Companion.getDatabase(app);
-            long dur = Math.max(0, (s.lastT - s.firstT) / 1000L);
             ContentValues cv = new ContentValues();
-            cv.put("startTime", s.firstT);
-            cv.put("midTime", s.firstT + (s.lastT - s.firstT) / 2);
-            cv.put("endTime", s.lastT);
-            cv.put("durationSeconds", dur);
-            cv.put("distanceKm", s.distanceKm());
-            cv.put("maxSpeedKmh", s.maxSpeed);
-            cv.put("avgSpeedKmh", dur > 0 ? s.distanceKm() / (dur / 3600.0) : 0.0);
-            cv.put("estimatedFuelUsedL", 0.0);
-            cv.put("weatherCondition", "Normal Dry");
-            cv.put("mode", mode);
-            cv.put("vehicleType", "ATV");
-            cv.put("warningCount", 0);
-            cv.put("isFinished", 1);
-            cv.put("startLat", s.startLat);
-            cv.put("startLon", s.startLon);
-            cv.put("midLat", s.endLat);
-            cv.put("midLon", s.endLon);
-            cv.put("endLat", s.endLat);
-            cv.put("endLon", s.endLon);
-            cv.put("peakGForce", s.peakG > 0 ? s.peakG : 1.0);
-            cv.put("smoothnessScore", 0);
-            cv.put("launchAccelTimeSec", 0.0);
-            cv.put("terrainSummary", note);
-            cv.put("isCompressed", 0);
+            for (java.util.Map.Entry<String, Object> e : RideRecord.rideRow(mode, vehicle, s, note).entrySet()) {
+                Object v = e.getValue();
+                if (v instanceof Long) cv.put(e.getKey(), (Long) v);
+                else if (v instanceof Integer) cv.put(e.getKey(), (Integer) v);
+                else if (v instanceof Double) cv.put(e.getKey(), (Double) v);
+                else cv.put(e.getKey(), String.valueOf(v));
+            }
             long id = db.getOpenHelper().getWritableDatabase().insert("ride_logs", 2 /* CONFLICT_ABORT */, cv);
-            Log.i(TAG, "inserted ride_logs id=" + id + " (" + note + ")");
+            Log.i(TAG, "inserted ride_logs id=" + id + " vehicle=" + vehicle + " (" + note + ")");
         } catch (Exception e) {
             Log.e(TAG, "ride insert failed", e);
         }
     }
 
-    /** Running aggregate of a ride (from live samples or from a CSV journal). */
-    static final class RideStats {
-        int samples;
-        long firstT, lastT;
-        double minDist = Double.MAX_VALUE, maxDist;
-        double maxSpeed;
-        double startLat, startLon, endLat, endLon;
-        double peakG, minAlt = Double.MAX_VALUE, maxAlt = -Double.MAX_VALUE;
-        String filterSummary = "";
-
+    /** Live-ride aggregate: the pure-Java JournalSummary plus the Android-typed inputs. */
+    static final class RideStats extends RideRecord.JournalSummary {
         void addSensors(SensorHub.Snapshot sn) {
             if (sn.peakG > peakG) peakG = sn.peakG;
             if (sn.hasPressure) { minAlt = Math.min(minAlt, sn.altM); maxAlt = Math.max(maxAlt, sn.altM); }
         }
 
-        double altRange() { return minAlt == Double.MAX_VALUE ? 0 : maxAlt - minAlt; }
-
-        void reset() {
-            samples = 0; firstT = lastT = 0; minDist = Double.MAX_VALUE; maxDist = 0; maxSpeed = 0;
-            peakG = 0; minAlt = Double.MAX_VALUE; maxAlt = -Double.MAX_VALUE; filterSummary = "";
-            startLat = startLon = endLat = endLon = 0;
-        }
-
         void add(long t, GpsData g) {
-            if (samples == 0) firstT = t;
-            lastT = t;
-            samples++;
+            addTime(t);
             if (g == null) return;
             addValues(g.getLatitude(), g.getLongitude(), g.getCurrentSpeedKmh(), g.getDistanceKm());
-        }
-
-        void addCsv(String line) {
-            String[] p = line.split(",", -1);
-            if (p.length < 7) return;
-            try {
-                long t = Long.parseLong(p[0]);
-                if (samples == 0) firstT = t;
-                lastT = t;
-                samples++;
-                if (p[2].isEmpty()) return;
-                if (p.length > 20 && !p[20].isEmpty()) peakG = Math.max(peakG, Double.parseDouble(p[20]));
-                addValues(Double.parseDouble(p[2]), Double.parseDouble(p[3]),
-                        Double.parseDouble(p[5]), Double.parseDouble(p[6]));
-            } catch (NumberFormatException ignored) { }
-        }
-
-        private void addValues(double lat, double lon, double speed, double dist) {
-            if (lat != 0 || lon != 0) {
-                if (startLat == 0 && startLon == 0) { startLat = lat; startLon = lon; }
-                endLat = lat; endLon = lon;
-            }
-            if (speed > maxSpeed) maxSpeed = speed;
-            if (dist < minDist) minDist = dist;
-            if (dist > maxDist) maxDist = dist;
-        }
-
-        double distanceKm() { return minDist == Double.MAX_VALUE ? 0 : Math.max(0, maxDist - minDist); }
-
-        String summaryLine() {
-            return "samples=" + samples + " dur_s=" + Math.max(0, (lastT - firstT) / 1000L)
-                    + " dist_km=" + fmt(distanceKm(), 3) + " vmax_kmh=" + fmt(maxSpeed, 1);
         }
     }
 
