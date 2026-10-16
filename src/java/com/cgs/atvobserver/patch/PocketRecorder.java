@@ -2,6 +2,10 @@ package com.cgs.atvobserver.patch;
 
 import android.content.ContentValues;
 import android.content.Context;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.PowerManager;
@@ -59,6 +63,12 @@ public final class PocketRecorder {
     private int ticksSinceAudioCheck;
     private volatile boolean activityGone;
     private final RideStats stats = new RideStats();
+    private final SensorHub sensors = new SensorHub();
+    private final AdaptiveEventFilter filter = new AdaptiveEventFilter();
+    // audio frame aggregation (polled at 10 Hz from the shared EngineAudioProcessor StateFlow)
+    private Object lastAudioObj;
+    private int aFrames, aPeriodic;
+    private double aSumDb, aMaxDb;
 
     private PocketRecorder(Context app) {
         this.app = app;
@@ -148,24 +158,33 @@ public final class PocketRecorder {
             try { gps.resetTrip(); } catch (Exception ignored) { }
         }
         acquireWakeLock();
+        filter.reset();
+        sensors.register(app, handler);
         handler.removeCallbacks(tick);
+        handler.removeCallbacks(audioPoll);
         handler.post(tick);
+        handler.post(audioPoll);
         Log.i(TAG, "ride session started: " + mode + " -> " + sessionFile);
     }
 
     private void endSession(String reason, boolean insertIntoDb) {
         if (sessionMode == null) return;
         handler.removeCallbacks(tick);
+        handler.removeCallbacks(audioPoll);
+        sensors.unregister();
+        stats.filterSummary = filter.summary();
         try {
             if (out != null) {
-                out.write("#END reason=" + reason + " rows=" + rows + " " + stats.summaryLine() + "\n");
+                out.write("#END reason=" + reason + " rows=" + rows + " " + stats.summaryLine()
+                        + " peak_g=" + fmt(stats.peakG, 2) + " alt_range_m=" + fmt(stats.altRange(), 1)
+                        + " filter=\"" + stats.filterSummary + "\"\n");
                 out.close();
             }
         } catch (Exception e) {
             Log.w(TAG, "journal close failed", e);
         }
         if (insertIntoDb) {
-            insertRide(sessionMode, stats, "Pocket journal (app closed before End Ride)");
+            insertRide(sessionMode, stats, "Pocket journal (app closed before End Ride) | " + stats.filterSummary);
         }
         Log.i(TAG, "ride session ended (" + reason + "): " + stats.summaryLine());
         out = null;
@@ -191,8 +210,32 @@ public final class PocketRecorder {
     };
 
     String header() {
-        return "t_ms,elapsed_s,lat,lon,acc_m,speed_kmh,dist_km,gps_ok,rms_db,rpm,rpm_var,engine,audio_conf";
+        return "t_ms,elapsed_s,lat,lon,acc_m,speed_kmh,dist_km,gps_ok,rms_db,rpm,rpm_var,engine,audio_conf"
+                + ",audio_frames,rms_mean_db,rms_max_db,periodic_frac,audio_floor_db,engine_gate_db"
+                + ",vib_rms,peak_g,gyro_rms,heading_deg,pressure_hpa,alt_m,lux,prox_near,pocketed"
+                + ",score,raw_state,state";
     }
+
+    /** 10 Hz poll of the audio StateFlow; each EngineAudioProcessor frame publishes a new object. */
+    private final Runnable audioPoll = new Runnable() {
+        @Override public void run() {
+            if (sessionMode == null) return;
+            EngineAudioProcessor audio = ObserverCompat.peekAudio();
+            if (audio != null && audio.getAnalysisState() != null) {
+                Object o = audio.getAnalysisState().getValue();
+                if (o != null && o != lastAudioObj) {
+                    lastAudioObj = o;
+                    AudioAnalysisResult a = (AudioAnalysisResult) o;
+                    double db = a.getAudioRmsDb();
+                    aFrames++;
+                    aSumDb += db;
+                    if (db > aMaxDb) aMaxDb = db;
+                    if (a.getEstimatedRpm() > 0) aPeriodic++;
+                }
+            }
+            handler.postDelayed(this, 100);
+        }
+    };
 
     void sample() throws Exception {
         long now = System.currentTimeMillis();
@@ -220,6 +263,31 @@ public final class PocketRecorder {
         } else {
             sb.append(",,,,");
         }
+        // ---- step 4: per-second audio aggregate + all motion/environment sensors + event filter
+        AdaptiveEventFilter.Features f = new AdaptiveEventFilter.Features();
+        f.rmsMeanDb = aFrames > 0 ? aSumDb / aFrames : 0;
+        f.rmsMaxDb = aMaxDb;
+        f.periodicFrac = aFrames > 0 ? (double) aPeriodic / aFrames : 0;
+        SensorHub.Snapshot sn = sensors.snapshotAndReset();
+        f.vibRms = sn.vibRms;
+        f.gyroRms = sn.gyroRms;
+        f.pocketed = sn.pocketed;
+        f.speedKmh = (g != null && g.isGpsAvailable() && g.getAccuracyMeters() > 0 && g.getAccuracyMeters() < 50)
+                ? g.getCurrentSpeedKmh() : -1;
+        AdaptiveEventFilter.State st = filter.classify(f);
+        stats.addSensors(sn);
+        sb.append(',').append(aFrames).append(',').append(fmt(f.rmsMeanDb, 1)).append(',').append(fmt(f.rmsMaxDb, 1))
+          .append(',').append(fmt(f.periodicFrac, 2)).append(',').append(fmt(AdaptiveEventFilter.floorDb(), 0))
+          .append(',').append(fmt(AdaptiveEventFilter.gateDb(), 0))
+          .append(',').append(fmt(sn.vibRms, 3)).append(',').append(fmt(sn.peakG, 2)).append(',').append(fmt(sn.gyroRms, 3))
+          .append(',').append(sn.hasHeading ? fmt(sn.headingDeg, 0) : "")
+          .append(',').append(sn.hasPressure ? fmt(sn.pressureHpa, 2) : "")
+          .append(',').append(sn.hasPressure ? fmt(sn.altM, 1) : "")
+          .append(',').append(sn.hasLux ? fmt(sn.lux, 0) : "")
+          .append(',').append(sn.hasProx ? (sn.proxNear ? "1" : "0") : "")
+          .append(',').append(sn.pocketed ? 1 : 0)
+          .append(',').append(fmt(filter.lastScore, 2)).append(',').append(filter.lastRaw).append(',').append(st);
+        aFrames = 0; aPeriodic = 0; aSumDb = 0; aMaxDb = 0;
         writeRow(sb.toString());
     }
 
@@ -325,7 +393,7 @@ public final class PocketRecorder {
             cv.put("midLon", s.endLon);
             cv.put("endLat", s.endLat);
             cv.put("endLon", s.endLon);
-            cv.put("peakGForce", 1.0);
+            cv.put("peakGForce", s.peakG > 0 ? s.peakG : 1.0);
             cv.put("smoothnessScore", 0);
             cv.put("launchAccelTimeSec", 0.0);
             cv.put("terrainSummary", note);
@@ -344,9 +412,19 @@ public final class PocketRecorder {
         double minDist = Double.MAX_VALUE, maxDist;
         double maxSpeed;
         double startLat, startLon, endLat, endLon;
+        double peakG, minAlt = Double.MAX_VALUE, maxAlt = -Double.MAX_VALUE;
+        String filterSummary = "";
+
+        void addSensors(SensorHub.Snapshot sn) {
+            if (sn.peakG > peakG) peakG = sn.peakG;
+            if (sn.hasPressure) { minAlt = Math.min(minAlt, sn.altM); maxAlt = Math.max(maxAlt, sn.altM); }
+        }
+
+        double altRange() { return minAlt == Double.MAX_VALUE ? 0 : maxAlt - minAlt; }
 
         void reset() {
             samples = 0; firstT = lastT = 0; minDist = Double.MAX_VALUE; maxDist = 0; maxSpeed = 0;
+            peakG = 0; minAlt = Double.MAX_VALUE; maxAlt = -Double.MAX_VALUE; filterSummary = "";
             startLat = startLon = endLat = endLon = 0;
         }
 
@@ -367,6 +445,7 @@ public final class PocketRecorder {
                 lastT = t;
                 samples++;
                 if (p[2].isEmpty()) return;
+                if (p.length > 20 && !p[20].isEmpty()) peakG = Math.max(peakG, Double.parseDouble(p[20]));
                 addValues(Double.parseDouble(p[2]), Double.parseDouble(p[3]),
                         Double.parseDouble(p[5]), Double.parseDouble(p[6]));
             } catch (NumberFormatException ignored) { }
@@ -387,6 +466,122 @@ public final class PocketRecorder {
         String summaryLine() {
             return "samples=" + samples + " dur_s=" + Math.max(0, (lastT - firstT) / 1000L)
                     + " dist_km=" + fmt(distanceKm(), 3) + " vmax_kmh=" + fmt(maxSpeed, 1);
+        }
+    }
+
+    /**
+     * All motion/environment sensors the device actually has (capability-detected, each optional).
+     * Runs on the recorder HandlerThread; aggregates per second.
+     */
+    static final class SensorHub implements SensorEventListener {
+        static final class Snapshot {
+            double vibRms, peakG, gyroRms, headingDeg, pressureHpa, altM, lux;
+            boolean hasHeading, hasPressure, hasLux, hasProx, proxNear, pocketed;
+        }
+        private SensorManager sm;
+        private final float[] gravity = new float[3];
+        private final float[] accel = new float[3];
+        private final float[] mag = new float[3];
+        private boolean haveAccel, haveMag, haveLinear;
+        private double vibSumSq, gyroSumSq, peakG;
+        private int vibN, gyroN;
+        private float lastPressure = Float.NaN, lastLux = Float.NaN;
+        private boolean proxPresent, proxNear;
+        private float proxMax;
+
+        void register(Context c, Handler h) {
+            try {
+                sm = (SensorManager) c.getSystemService(Context.SENSOR_SERVICE);
+                int rate = DeviceCapabilities.isLowRam(c) ? SensorManager.SENSOR_DELAY_UI : SensorManager.SENSOR_DELAY_GAME;
+                Sensor lin = sm.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+                haveLinear = lin != null;
+                reg(sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), rate, h);
+                if (haveLinear) reg(lin, rate, h);
+                reg(sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE), rate, h);
+                reg(sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD), SensorManager.SENSOR_DELAY_UI, h);
+                reg(sm.getDefaultSensor(Sensor.TYPE_PRESSURE), SensorManager.SENSOR_DELAY_NORMAL, h);
+                reg(sm.getDefaultSensor(Sensor.TYPE_LIGHT), SensorManager.SENSOR_DELAY_NORMAL, h);
+                Sensor prox = sm.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+                proxPresent = prox != null;
+                if (proxPresent) { proxMax = prox.getMaximumRange(); reg(prox, SensorManager.SENSOR_DELAY_NORMAL, h); }
+            } catch (Exception e) {
+                android.util.Log.w(TAG, "sensor registration failed", e);
+            }
+        }
+
+        private void reg(Sensor s, int rate, Handler h) {
+            if (s != null && sm != null) sm.registerListener(this, s, rate, h);
+        }
+
+        void unregister() {
+            try { if (sm != null) sm.unregisterListener(this); } catch (Exception ignored) { }
+        }
+
+        @Override public void onSensorChanged(SensorEvent e) {
+            float[] v = e.values;
+            switch (e.sensor.getType()) {
+                case Sensor.TYPE_ACCELEROMETER: {
+                    System.arraycopy(v, 0, accel, 0, 3);
+                    haveAccel = true;
+                    double g = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) / SensorManager.GRAVITY_EARTH;
+                    if (g > peakG) peakG = g;
+                    if (!haveLinear) { // low-pass gravity estimate, high-pass = vibration
+                        for (int i = 0; i < 3; i++) gravity[i] = 0.9f * gravity[i] + 0.1f * v[i];
+                        double x = v[0] - gravity[0], y = v[1] - gravity[1], z = v[2] - gravity[2];
+                        vibSumSq += x * x + y * y + z * z; vibN++;
+                    }
+                    break;
+                }
+                case Sensor.TYPE_LINEAR_ACCELERATION:
+                    vibSumSq += v[0] * v[0] + v[1] * v[1] + v[2] * v[2]; vibN++;
+                    break;
+                case Sensor.TYPE_GYROSCOPE:
+                    gyroSumSq += v[0] * v[0] + v[1] * v[1] + v[2] * v[2]; gyroN++;
+                    break;
+                case Sensor.TYPE_MAGNETIC_FIELD:
+                    System.arraycopy(v, 0, mag, 0, 3); haveMag = true;
+                    break;
+                case Sensor.TYPE_PRESSURE:
+                    lastPressure = v[0];
+                    break;
+                case Sensor.TYPE_LIGHT:
+                    lastLux = v[0];
+                    break;
+                case Sensor.TYPE_PROXIMITY:
+                    // many proximity sensors are binary (0 or max range)
+                    proxNear = v[0] < Math.min(5f, proxMax > 0 ? proxMax : 5f);
+                    break;
+                default:
+            }
+        }
+
+        @Override public void onAccuracyChanged(Sensor s, int a) { }
+
+        Snapshot snapshotAndReset() {
+            Snapshot sn = new Snapshot();
+            sn.vibRms = vibN > 0 ? Math.sqrt(vibSumSq / vibN) : 0;
+            sn.gyroRms = gyroN > 0 ? Math.sqrt(gyroSumSq / gyroN) : 0;
+            sn.peakG = peakG;
+            if (haveAccel && haveMag) {
+                float[] r = new float[9], o = new float[3];
+                if (SensorManager.getRotationMatrix(r, null, accel, mag)) {
+                    SensorManager.getOrientation(r, o);
+                    sn.headingDeg = (Math.toDegrees(o[0]) + 360.0) % 360.0;
+                    sn.hasHeading = true;
+                }
+            }
+            if (!Float.isNaN(lastPressure)) {
+                sn.hasPressure = true;
+                sn.pressureHpa = lastPressure;
+                sn.altM = SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, lastPressure);
+            }
+            if (!Float.isNaN(lastLux)) { sn.hasLux = true; sn.lux = lastLux; }
+            sn.hasProx = proxPresent;
+            sn.proxNear = proxNear;
+            // pocket detection: proximity covered, or (no proximity sensor) darkness - same lux rule the app uses
+            sn.pocketed = proxPresent ? proxNear : (sn.hasLux && sn.lux < 5f);
+            vibSumSq = 0; vibN = 0; gyroSumSq = 0; gyroN = 0; peakG = 0;
+            return sn;
         }
     }
 }

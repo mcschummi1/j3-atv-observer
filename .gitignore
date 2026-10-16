@@ -9,3 +9,4 @@ out/
 keystore.b64
 signing.env
 .tools/
+build-test/

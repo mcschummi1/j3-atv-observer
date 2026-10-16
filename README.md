@@ -39,3 +39,8 @@ Ride journals are written to `Android/data/com.cgs.atvobserver/files/ride_journa
 ## Device compatibility (step 3)
 Runtime capability detection for Galaxy J3 (Android 9) / A71 (rooted) / S22 / Razr 40 (Android 16),
 OEM battery-manager steps and the `capabilities.json` report: [`docs/DEVICES.md`](docs/DEVICES.md).
+
+## Sensors + filtering (step 4)
+All available motion/environment sensors (incl. proximity) feed the service journal; an adaptive
+DSP engine gate and a hand-weighted (not trained) event classifier reject transient noise.
+Details, test output and what a real TFLite implementation would need: [`docs/AI_FILTERING.md`](docs/AI_FILTERING.md).

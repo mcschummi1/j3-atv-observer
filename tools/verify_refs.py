@@ -35,7 +35,9 @@ for dp, _, fs in os.walk(root):
 def resolve(cls, member):
     seen = 0
     while cls and seen < 30:
-        if member in defs.get(cls, ()):
+        if cls not in defs:          # chain reaches a framework class (java/*, android/*): resolved at runtime
+            return True
+        if member in defs[cls]:
             return True
         cls = supers.get(cls); seen += 1
     return False
