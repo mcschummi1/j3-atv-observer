@@ -80,6 +80,13 @@ owner-pinned `v1.1.7` / 17 release is untouched), writes the `J3ATV-VersionCode:
 body, refuses to publish if the APK's `versionCode` differs from it, and `scripts/build.sh` writes the
 `.sha256` with the bare file name. The universal signing key setup is unchanged (GitHub secrets only).
 
+## DIAG variant
+The optional side-by-side diagnostic build (`PACKAGE_SUFFIX=.diag`, application id `com.cgs.atvobserver.diag`)
+has the updater disabled (`Variant.isDiag(getPackageName())`: no network, no download, no install). Its
+pre-release carries no `J3ATV-VersionCode:` marker, no legacy `- versionName:` line and a `-diag` tag, so
+`ReleaseUpdater` skips it for the normal app (`tests/UpdaterTest.java`). The updater's package and
+signature checks use `getPackageName()` and need no patching.
+
 ## Limitations / not verified
 * Never run on Android: layout of the 12 sp clickable menu line, the dialogs, the settings round-trip, the
   `PackageInstaller` callback on API 28-36, notification behaviour and the OEM install UIs (Samsung, Motorola)

@@ -30,11 +30,11 @@ KEYSTORE_FILE=... KEYSTORE_PASSWORD=... KEY_ALIAS=... KEY_PASSWORD=... ./scripts
 Pipeline: `apktool d` → `patch -p1 < patches/*.patch` → compile `src/java` (against
 `src/stubs` + android.jar) with javac/d8 → baksmali into `smali_classes17` → `apktool b` →
 `zipalign -p 4` → `apksigner` → `tools/verify_refs.py` static link check.
-Signature scheme: the output carries a **v3 signature only** (`apksigner verify`: v2 = false,
-v3 = true). `apksigner` is invoked with `--min-sdk-version 28`, and for API 28+ it omits the v2
-block. This is fine for every target device (Galaxy J3 Android 9 = API 28, A71, S22, Razr 40 are all
-API 28+, and API 28 is where v3 support starts); the APK would not install on API < 28, which
-`minSdk 28` excludes anyway.
+Signature scheme: the output carries a **v2 and a v3 signature block**. `apksigner verify` (which
+defaults to the manifest's minSdk 28) reports "v2 = false, v3 = true" because on API 28+ it verifies only
+v3; with `--min-sdk-version 24 --max-sdk-version 27` it verifies v2. `apksigner` is invoked with
+`--min-sdk-version 28`, so there is no v1 (JAR) signature. Every target device (Galaxy J3 Android 9 = API 28,
+A71, S22, Razr 40) is API 28+, and `minSdk 28` excludes older ones anyway.
 Tools (apktool 2.12.0, build-tools 34, android-34 android.jar, baksmali 3.0.3) are downloaded to
 `.tools/` on first run.
 
@@ -75,6 +75,12 @@ with the universal key from secrets, and publishes a GitHub **pre-release** `v1.
 with the APK and its SHA-256. `versionCode = 100 + run number` (the owner-pinned `v1.1.7` release has
 versionCode 17), so every workflow build is newer than the previous one; the release notes carry a
 machine-readable `J3ATV-VersionCode: <n>` line that the in-app updater reads.
+
+### Optional DIAG variant (side-by-side install)
+`PACKAGE_SUFFIX=.diag ./scripts/build.sh` (or the workflow input `package_suffix`) builds the same app as
+`com.cgs.atvobserver.diag`, launcher label "J3 ATV Observer DIAG", in-app updater disabled; default (empty)
+= the normal build, unchanged. Used to tell a ghost copy of the package from other install problems:
+[`docs/INSTALL_TROUBLESHOOTING.md`](docs/INSTALL_TROUBLESHOOTING.md). Not tested on a physical device.
 
 ## In-app updater
 The main menu's version line shows the installed version and, when tapped, opens an update screen that

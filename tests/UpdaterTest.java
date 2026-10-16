@@ -48,6 +48,10 @@ public class UpdaterTest {
         check("legacy -ci.<run> tag -> 100+run = 112", r != null && (Integer) r[0] == 112);
         check("plain semver tag without marker -> unknown (never guessed)", ReleaseUpdater.versionCodeOf("v1.1.9", "notes") == null);
         check("marker wins over legacy tag", (Integer) ReleaseUpdater.versionCodeOf("v-ci.5", "J3ATV-VersionCode: 300")[0] == 300);
+        // DIAG pre-release (workflow package_suffix): neither marker, legacy body line nor legacy tag -> never offered to the normal app
+        check("DIAG release (tag ...-ci.7-diag, no marker) is ignored by the normal updater",
+                ReleaseUpdater.versionCodeOf("v1.1.7-Mk1-pocketfix-ci.7-diag",
+                        "DIAG build, package com.cgs.atvobserver.diag\n- versionName `1.1.7-Mk1-pocketfix-ci.7-diag`, versionCode `107`\n") == null);
         check("marker must be on its own line (quoted prose ignored)",
                 ReleaseUpdater.versionCodeOf("v1", "see J3ATV-VersionCode: 999 in docs") == null);
         check("zero rejected", ReleaseUpdater.versionCodeOf("v1", "J3ATV-VersionCode: 0") == null);
