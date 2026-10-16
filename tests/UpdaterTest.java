@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * Host-JVM test of the Android-free updater logic: release-list parsing, versionCode rule,
- * pre-release handling, SHA-256 file handling, URL policy, 24 h throttle and user-facing messages.
+ * pre-release handling, SHA-256 file handling, URL policy and user-facing messages.
  * Fixtures mirror the real GitHub API shape (the v1.1.7 fixture is a trimmed copy of the live response).
  */
 public class UpdaterTest {
@@ -134,16 +134,6 @@ public class UpdaterTest {
         Candidate nodigest = ReleaseUpdater.parseReleases(list(release("n", true, false, body + "5", "2026-01-01T00:00:00Z",
                 asset("n.apk", 1, null, "uploaded"), asset("n.apk.sha256", 1, null, "uploaded")))).candidates.get(0);
         check("old release without API digest still verifiable via .sha256", ReleaseUpdater.expectedSha256(nodigest, H2 + " n.apk").equals(H2));
-
-        // ---- throttle + dismissal
-        long day = 24L * 3600 * 1000, now = 1_800_000_000_000L;
-        check("never checked -> due", ReleaseUpdater.autoCheckDue(0, now));
-        check("checked 1 h ago -> not due", !ReleaseUpdater.autoCheckDue(now - 3600_000L, now));
-        check("checked 23h59m ago -> not due", !ReleaseUpdater.autoCheckDue(now - day + 60_000L, now));
-        check("checked exactly 24 h ago -> due", ReleaseUpdater.autoCheckDue(now - day, now));
-        check("clock moved backwards -> due", ReleaseUpdater.autoCheckDue(now + 5 * day, now));
-        check("dismissed version is not prompted again", !ReleaseUpdater.shouldPrompt(best, 130) && ReleaseUpdater.shouldPrompt(best, 120) && ReleaseUpdater.shouldPrompt(best, 0));
-        check("no candidate -> no prompt", !ReleaseUpdater.shouldPrompt(null, 0));
 
         // ---- messages
         String url = "https://github.com/mcschummi1/j3-atv-observer/releases/tag/v1";

@@ -32,7 +32,6 @@ public final class ReleaseUpdater {
     public static final String REPO = "mcschummi1/j3-atv-observer";
     public static final String RELEASES_URL = "https://api.github.com/repos/" + REPO + "/releases?per_page=100";
     public static final String VERSION_MARKER = "J3ATV-VersionCode";
-    public static final long AUTO_CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000;
     /** Hard cap for the release list response and the .sha256 file (the APK has its own cap). */
     public static final int MAX_JSON_BYTES = 2 * 1024 * 1024;
     public static final long MAX_APK_BYTES = 300L * 1024 * 1024;
@@ -230,17 +229,6 @@ public final class ReleaseUpdater {
         char[] out = new char[bytes.length * 2];
         for (int i = 0; i < bytes.length; i++) { out[2 * i] = d[(bytes[i] >> 4) & 15]; out[2 * i + 1] = d[bytes[i] & 15]; }
         return new String(out);
-    }
-
-    // ------------------------------------------------------------------ scheduling
-    /** At most one automatic check per 24 h; a clock that went backwards counts as "due". */
-    public static boolean autoCheckDue(long lastCheckMs, long nowMs) {
-        return lastCheckMs <= 0 || nowMs < lastCheckMs || nowMs - lastCheckMs >= AUTO_CHECK_INTERVAL_MS;
-    }
-
-    /** The automatic prompt is shown once per offered versionCode; the manual entry always shows it. */
-    public static boolean shouldPrompt(Candidate c, int dismissedVersionCode) {
-        return c != null && c.versionCode != dismissedVersionCode;
     }
 
     // ------------------------------------------------------------------ user-facing text
