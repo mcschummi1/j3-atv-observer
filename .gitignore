@@ -8,3 +8,4 @@ out/
 *.p12
 keystore.b64
 signing.env
+.tools/

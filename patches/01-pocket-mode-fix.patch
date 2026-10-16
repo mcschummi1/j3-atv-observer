@@ -1,0 +1,236 @@
+diff -ruN -x build -x dist apktool/AndroidManifest.xml patched/AndroidManifest.xml
+--- apktool/AndroidManifest.xml	2026-10-16 08:22:07.524854486 +0000
++++ patched/AndroidManifest.xml	2026-10-16 08:28:22.752854486 +0000
+@@ -9,6 +9,7 @@
+     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS"/>
+     <uses-feature android:name="android.hardware.camera" android:required="false"/>
+     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+@@ -23,7 +24,7 @@
+                 <category android:name="android.intent.category.LAUNCHER"/>
+             </intent-filter>
+         </activity>
+-        <service android:exported="false" android:foregroundServiceType="location" android:name="com.cgs.atvobserver.service.ObserverForegroundService"/>
++        <service android:exported="false" android:foregroundServiceType="location|microphone" android:name="com.cgs.atvobserver.service.ObserverForegroundService"/>
+         <service android:enabled="false" android:exported="false" android:name="androidx.camera.core.impl.MetadataHolderService">
+             <meta-data android:name="androidx.camera.core.impl.MetadataHolderService.DEFAULT_CONFIG_PROVIDER" android:value="androidx.camera.camera2.Camera2Config$DefaultProvider"/>
+         </service>
+diff -ruN -x build -x dist apktool/smali_classes12/com/cgs/atvobserver/service/ObserverForegroundService.smali patched/smali_classes12/com/cgs/atvobserver/service/ObserverForegroundService.smali
+--- apktool/smali_classes12/com/cgs/atvobserver/service/ObserverForegroundService.smali	2026-10-16 08:18:03.248854486 +0000
++++ patched/smali_classes12/com/cgs/atvobserver/service/ObserverForegroundService.smali	2026-10-16 08:28:22.760854486 +0000
+@@ -458,8 +458,6 @@
+     invoke-direct {p0}, Lcom/cgs/atvobserver/service/ObserverForegroundService;->createNotificationChannel()V
+ 
+     .line 84
+-    new-instance v0, Lcom/cgs/atvobserver/location/GpsTracker;
+-
+     invoke-virtual {p0}, Lcom/cgs/atvobserver/service/ObserverForegroundService;->getApplicationContext()Landroid/content/Context;
+ 
+     move-result-object v1
+@@ -468,27 +466,32 @@
+ 
+     invoke-static {v1, v2}, Lkotlin/jvm/internal/Intrinsics;->checkNotNullExpressionValue(Ljava/lang/Object;Ljava/lang/String;)V
+ 
+-    invoke-direct {v0, v1}, Lcom/cgs/atvobserver/location/GpsTracker;-><init>(Landroid/content/Context;)V
++    # PATCH: shared process-wide instance instead of a private duplicate
++    invoke-static {v1}, Lcom/cgs/atvobserver/patch/ObserverCompat;->sharedGps(Landroid/content/Context;)Lcom/cgs/atvobserver/location/GpsTracker;
++
++    move-result-object v0
+ 
+     iput-object v0, p0, Lcom/cgs/atvobserver/service/ObserverForegroundService;->gpsTracker:Lcom/cgs/atvobserver/location/GpsTracker;
+ 
+     .line 85
+-    new-instance v0, Lcom/cgs/atvobserver/audio/EngineAudioProcessor;
++    # PATCH: shared process-wide instance (one AudioRecord per process)
++    invoke-static {}, Lcom/cgs/atvobserver/patch/ObserverCompat;->sharedAudio()Lcom/cgs/atvobserver/audio/EngineAudioProcessor;
+ 
+-    invoke-direct {v0}, Lcom/cgs/atvobserver/audio/EngineAudioProcessor;-><init>()V
++    move-result-object v0
+ 
+     iput-object v0, p0, Lcom/cgs/atvobserver/service/ObserverForegroundService;->audioProcessor:Lcom/cgs/atvobserver/audio/EngineAudioProcessor;
+ 
+     .line 86
+-    new-instance v0, Lcom/cgs/atvobserver/sensor/UniversalSensorManager;
+-
+     invoke-virtual {p0}, Lcom/cgs/atvobserver/service/ObserverForegroundService;->getApplicationContext()Landroid/content/Context;
+ 
+     move-result-object v1
+ 
+     invoke-static {v1, v2}, Lkotlin/jvm/internal/Intrinsics;->checkNotNullExpressionValue(Ljava/lang/Object;Ljava/lang/String;)V
+ 
+-    invoke-direct {v0, v1}, Lcom/cgs/atvobserver/sensor/UniversalSensorManager;-><init>(Landroid/content/Context;)V
++    # PATCH: shared process-wide instance
++    invoke-static {v1}, Lcom/cgs/atvobserver/patch/ObserverCompat;->sharedSensors(Landroid/content/Context;)Lcom/cgs/atvobserver/sensor/UniversalSensorManager;
++
++    move-result-object v0
+ 
+     iput-object v0, p0, Lcom/cgs/atvobserver/service/ObserverForegroundService;->universalSensorManager:Lcom/cgs/atvobserver/sensor/UniversalSensorManager;
+ 
+@@ -544,7 +547,10 @@
+ 
+     check-cast v1, Landroidx/lifecycle/LifecycleOwner;
+ 
+-    invoke-virtual {v0, v1}, Lcom/cgs/atvobserver/camera/CameraAnalyzerManager;->startCameraAnalysis(Landroidx/lifecycle/LifecycleOwner;)V
++    # PATCH: camera removed from the service (no camera FGS type; pocket mode pauses camera anyway)
++
++    # PATCH: start the service-owned ride journal (wake lock + CSV + crash recovery)
++    invoke-static {p0}, Lcom/cgs/atvobserver/patch/ObserverCompat;->onServiceCreate(Landroid/app/Service;)V
+ 
+     .line 96
+     sget-object v0, Lcom/cgs/atvobserver/service/ObserverForegroundService;->_isServiceRunning:Lkotlinx/coroutines/flow/MutableStateFlow;
+@@ -564,6 +570,9 @@
+ .method public onDestroy()V
+     .locals 3
+ 
++    # PATCH: finalize ride journal / release wake lock
++    invoke-static {p0}, Lcom/cgs/atvobserver/patch/ObserverCompat;->onServiceDestroy(Landroid/app/Service;)V
++
+     .line 130
+     invoke-super {p0}, Landroid/app/Service;->onDestroy()V
+ 
+@@ -762,7 +771,8 @@
+     .local v3, "notification":Landroid/app/Notification;
+     const/16 v5, 0x3e9
+ 
+-    invoke-virtual {p0, v5, v3}, Lcom/cgs/atvobserver/service/ObserverForegroundService;->startForeground(ILandroid/app/Notification;)V
++    # PATCH: typed startForeground (microphone|location) with fallbacks
++    invoke-static {p0, v5, v3}, Lcom/cgs/atvobserver/patch/ObserverCompat;->startForegroundCompat(Landroid/app/Service;ILandroid/app/Notification;)V
+ 
+     .line 122
+     return v4
+diff -ruN -x build -x dist apktool/smali_classes3/com/cgs/atvobserver/MainActivity$onCreate$2$1$1$2$1.smali patched/smali_classes3/com/cgs/atvobserver/MainActivity$onCreate$2$1$1$2$1.smali
+--- apktool/smali_classes3/com/cgs/atvobserver/MainActivity$onCreate$2$1$1$2$1.smali	2026-10-16 08:18:03.192854486 +0000
++++ patched/smali_classes3/com/cgs/atvobserver/MainActivity$onCreate$2$1$1$2$1.smali	2026-10-16 08:28:22.760854486 +0000
+@@ -213,6 +213,15 @@
+ 
+     move-object v1, p0
+ 
++    # PATCH: tell the service-side ride journal which screen is active
++    iget-object v2, v1, Lcom/cgs/atvobserver/MainActivity$onCreate$2$1$1$2$1;->$currentScreen$delegate:Landroidx/compose/runtime/MutableState;
++
++    invoke-static {v2}, Lcom/cgs/atvobserver/MainActivity$onCreate$2$1$1;->access$invoke$lambda$2(Landroidx/compose/runtime/MutableState;)Ljava/lang/String;
++
++    move-result-object v2
++
++    invoke-static {v2}, Lcom/cgs/atvobserver/patch/ObserverCompat;->onScreenChanged(Ljava/lang/String;)V
++
+     .line 144
+     .restart local v1    # "this":Lcom/cgs/atvobserver/MainActivity$onCreate$2$1$1$2$1;
+     .restart local p1    # "$result":Ljava/lang/Object;
+diff -ruN -x build -x dist apktool/smali_classes3/com/cgs/atvobserver/MainActivity.smali patched/smali_classes3/com/cgs/atvobserver/MainActivity.smali
+--- apktool/smali_classes3/com/cgs/atvobserver/MainActivity.smali	2026-10-16 08:18:03.200854486 +0000
++++ patched/smali_classes3/com/cgs/atvobserver/MainActivity.smali	2026-10-16 08:28:22.760854486 +0000
+@@ -403,6 +403,11 @@
+ 
+     check-cast v3, Lkotlinx/coroutines/CoroutineScope;
+ 
++    # PATCH: run audio on an app-wide scope, not the Activity lifecycleScope
++    invoke-static {v3}, Lcom/cgs/atvobserver/patch/ObserverCompat;->audioScope(Lkotlinx/coroutines/CoroutineScope;)Lkotlinx/coroutines/CoroutineScope;
++
++    move-result-object v3
++
+     invoke-virtual {v1, v3}, Lcom/cgs/atvobserver/audio/EngineAudioProcessor;->startListening(Lkotlinx/coroutines/CoroutineScope;)V
+ 
+     .line 440
+@@ -552,6 +557,11 @@
+ 
+     check-cast v5, Lkotlinx/coroutines/CoroutineScope;
+ 
++    # PATCH: run audio on an app-wide scope, not the Activity lifecycleScope
++    invoke-static {v5}, Lcom/cgs/atvobserver/patch/ObserverCompat;->audioScope(Lkotlinx/coroutines/CoroutineScope;)Lkotlinx/coroutines/CoroutineScope;
++
++    move-result-object v5
++
+     invoke-virtual {v4, v5}, Lcom/cgs/atvobserver/audio/EngineAudioProcessor;->startListening(Lkotlinx/coroutines/CoroutineScope;)V
+ 
+     .line 67
+@@ -581,6 +591,11 @@
+ 
+     .line 70
+     :cond_8
++    # PATCH: (re)start the foreground service now that permissions may have been granted
++    const-string v0, "CGS Observer Running - Maximum Process Priority"
++
++    invoke-static {p0, v0}, Lcom/cgs/atvobserver/patch/ObserverCompat;->startServiceIfPermitted(Landroid/content/Context;Ljava/lang/String;)V
++
+     return-void
+ .end method
+ 
+@@ -672,35 +687,38 @@
+     iput-object v0, p0, Lcom/cgs/atvobserver/MainActivity;->daelimOdometerManager:Lcom/cgs/atvobserver/domain/DaelimOdometerManager;
+ 
+     .line 83
+-    new-instance v0, Lcom/cgs/atvobserver/location/GpsTracker;
+-
+     invoke-virtual {p0}, Lcom/cgs/atvobserver/MainActivity;->getApplicationContext()Landroid/content/Context;
+ 
+     move-result-object v1
+ 
+     invoke-static {v1, v2}, Lkotlin/jvm/internal/Intrinsics;->checkNotNullExpressionValue(Ljava/lang/Object;Ljava/lang/String;)V
+ 
+-    invoke-direct {v0, v1}, Lcom/cgs/atvobserver/location/GpsTracker;-><init>(Landroid/content/Context;)V
++    # PATCH: shared process-wide instance
++    invoke-static {v1}, Lcom/cgs/atvobserver/patch/ObserverCompat;->sharedGps(Landroid/content/Context;)Lcom/cgs/atvobserver/location/GpsTracker;
++
++    move-result-object v0
+ 
+     iput-object v0, p0, Lcom/cgs/atvobserver/MainActivity;->gpsTracker:Lcom/cgs/atvobserver/location/GpsTracker;
+ 
+     .line 84
+-    new-instance v0, Lcom/cgs/atvobserver/audio/EngineAudioProcessor;
++    # PATCH: shared process-wide instance
++    invoke-static {}, Lcom/cgs/atvobserver/patch/ObserverCompat;->sharedAudio()Lcom/cgs/atvobserver/audio/EngineAudioProcessor;
+ 
+-    invoke-direct {v0}, Lcom/cgs/atvobserver/audio/EngineAudioProcessor;-><init>()V
++    move-result-object v0
+ 
+     iput-object v0, p0, Lcom/cgs/atvobserver/MainActivity;->audioProcessor:Lcom/cgs/atvobserver/audio/EngineAudioProcessor;
+ 
+     .line 85
+-    new-instance v0, Lcom/cgs/atvobserver/sensor/UniversalSensorManager;
+-
+     invoke-virtual {p0}, Lcom/cgs/atvobserver/MainActivity;->getApplicationContext()Landroid/content/Context;
+ 
+     move-result-object v1
+ 
+     invoke-static {v1, v2}, Lkotlin/jvm/internal/Intrinsics;->checkNotNullExpressionValue(Ljava/lang/Object;Ljava/lang/String;)V
+ 
+-    invoke-direct {v0, v1}, Lcom/cgs/atvobserver/sensor/UniversalSensorManager;-><init>(Landroid/content/Context;)V
++    # PATCH: shared process-wide instance
++    invoke-static {v1}, Lcom/cgs/atvobserver/patch/ObserverCompat;->sharedSensors(Landroid/content/Context;)Lcom/cgs/atvobserver/sensor/UniversalSensorManager;
++
++    move-result-object v0
+ 
+     iput-object v0, p0, Lcom/cgs/atvobserver/MainActivity;->universalSensorManager:Lcom/cgs/atvobserver/sensor/UniversalSensorManager;
+ 
+@@ -803,7 +821,8 @@
+ 
+     const-string v2, "CGS Observer Running - Maximum Process Priority"
+ 
+-    invoke-virtual {v0, v3, v2}, Lcom/cgs/atvobserver/service/ObserverForegroundService$Companion;->startService(Landroid/content/Context;Ljava/lang/String;)V
++    # PATCH: only start the typed FGS once a while-in-use permission exists (Android 14 SecurityException)
++    invoke-static {v3, v2}, Lcom/cgs/atvobserver/patch/ObserverCompat;->startServiceIfPermitted(Landroid/content/Context;Ljava/lang/String;)V
+ 
+     .line 103
+     move-object v0, p0
+@@ -836,6 +855,17 @@
+     .line 445
+     invoke-super {p0}, Landroidx/activity/ComponentActivity;->onDestroy()V
+ 
++    # PATCH: do not tear down recording if a TRIP/POCKET ride is in progress
++    invoke-static {p0}, Lcom/cgs/atvobserver/patch/ObserverCompat;->keepRecordingOnDestroy(Landroid/app/Activity;)Z
++
++    move-result v0
++
++    if-eqz v0, :patch_teardown
++
++    return-void
++
++    :patch_teardown
++
+     .line 446
+     iget-object v0, p0, Lcom/cgs/atvobserver/MainActivity;->gpsTracker:Lcom/cgs/atvobserver/location/GpsTracker;
+ 
