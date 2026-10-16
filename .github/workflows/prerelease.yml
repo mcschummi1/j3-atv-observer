@@ -43,10 +43,11 @@ jobs:
       - name: Compute version
         id: ver
         run: |
-          # Owner-pinned release version: versionName 1.1.7, versionCode 17.
-          # Any future build MUST bump these (versionCode has to grow to install over this one).
-          echo "code=17" >> "$GITHUB_OUTPUT"
-          echo "name=1.1.7" >> "$GITHUB_OUTPUT"
+          # versionCode = 100 + run number: always above the owner-pinned release v1.1.7 (versionCode 17)
+          # and strictly growing, so the in-app updater (docs/IN_APP_UPDATER.md) and Android's
+          # "no downgrade" rule both see every later build as newer. The tag is unique per run.
+          echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          echo "name=1.1.7-Mk1-pocketfix-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Restore universal signing key from secrets
         env:
@@ -80,11 +81,14 @@ jobs:
           EXTRA_NOTES: ${{ github.event.inputs.release_notes }}
         run: |
           APK="out/j3-atv-observer-${VERSION_NAME}.apk"
+          # the versionCode advertised to the in-app updater must be the one inside the APK
+          grep -q "versionCode='${VERSION_CODE}'" build/badging.txt || { echo "::error::APK versionCode differs from ${VERSION_CODE}"; exit 1; }
           CERT=$(grep -m1 "certificate SHA-256" build/verify.txt | sed 's/.*: //')
           {
             echo "Automated pre-release build of J3 ATV Observer (patched from v1.1.6-Mk1)."
             echo
             echo "- versionName: \`${VERSION_NAME}\`, versionCode: \`${VERSION_CODE}\`"
+            echo "- APK asset: \`${APK##*/}\` (+ \`.sha256\`), installed by the in-app updater only after the digest matches"
             echo "- commit: \`${GITHUB_SHA}\`"
             echo "- signing certificate SHA-256: \`${CERT}\` (universal key)"
             echo "- APK SHA-256: \`$(cut -d' ' -f1 "${APK}.sha256")\`"
@@ -93,8 +97,12 @@ jobs:
             echo "Later builds from this workflow update in place."
             echo
             echo "Not tested on physical devices by CI."
+            echo
+            echo "Machine-readable (read by the in-app updater, keep on its own line):"
+            echo "J3ATV-VersionCode: ${VERSION_CODE}"
             [ -n "$EXTRA_NOTES" ] && { echo; echo "$EXTRA_NOTES"; }
           } > notes.md
+          grep -qx "J3ATV-VersionCode: ${VERSION_CODE}" notes.md
           gh release create "v${VERSION_NAME}" "$APK" "${APK}.sha256" \
             --prerelease --target "$GITHUB_SHA" \
             --title "J3 ATV Observer ${VERSION_NAME} (pre-release)" \

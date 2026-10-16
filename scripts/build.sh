@@ -126,5 +126,5 @@ grep -E "^Verifies|v2 scheme|v3 scheme|certificate DN|SHA-256" "$BUILD/verify.tx
 "$BT/aapt2" dump badging "$OUT_APK" > "$BUILD/badging.txt"
 head -3 "$BUILD/badging.txt"
 python3 "$ROOT/tools/verify_refs.py" "$BUILD/decoded"
-sha256sum "$OUT_APK" | tee "$OUT_APK.sha256"
+( cd "$OUT_DIR" && sha256sum "$(basename "$OUT_APK")" ) | tee "$OUT_APK.sha256"   # basename only: the in-app updater matches the file name
 echo "OK -> $OUT_APK"
