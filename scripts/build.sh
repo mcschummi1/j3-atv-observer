@@ -110,7 +110,8 @@ OUT_APK="$OUT_DIR/j3-atv-observer-${VERSION_NAME}.apk"
 "$BT/apksigner" sign --ks "$KEYSTORE_FILE" --ks-pass "env:KEYSTORE_PASSWORD" \
   --ks-key-alias "$KEY_ALIAS" --key-pass "env:KEY_PASSWORD" \
   --min-sdk-version 28 --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out "$OUT_APK" "$BUILD/aligned.apk"
-"$BT/apksigner" verify --verbose --print-certs "$OUT_APK" | tee "$BUILD/verify.txt" | head -12
+"$BT/apksigner" verify --verbose --print-certs "$OUT_APK" > "$BUILD/verify.txt"
+grep -E "^Verifies|v2 scheme|v3 scheme|certificate DN|SHA-256" "$BUILD/verify.txt"
 "$BT/aapt2" dump badging "$OUT_APK" > "$BUILD/badging.txt"
 head -3 "$BUILD/badging.txt"
 python3 "$ROOT/tools/verify_refs.py" "$BUILD/decoded"

@@ -56,6 +56,7 @@ public final class PocketRecorder {
     private long sessionStartWall;
     private long sessionStartElapsed;
     private int rows;
+    private int ticksSinceAudioCheck;
     private volatile boolean activityGone;
     private final RideStats stats = new RideStats();
 
@@ -71,6 +72,8 @@ public final class PocketRecorder {
         if (sInstance != null) return;
         sInstance = new PocketRecorder(app);
         sInstance.handler.post(sInstance::recoverOrphans);
+        final PocketRecorder r0 = sInstance;
+        r0.handler.post(() -> DeviceCapabilities.writeReport(r0.app, r0.journalDir()));
         Log.i(TAG, "PocketRecorder started");
     }
 
@@ -175,6 +178,10 @@ public final class PocketRecorder {
         @Override public void run() {
             if (sessionMode == null) return;
             try {
+                if (++ticksSinceAudioCheck >= 10) {      // retry the mic every 10 s if it was busy
+                    ticksSinceAudioCheck = 0;
+                    ObserverCompat.ensureAudioRunning();
+                }
                 sample();
             } catch (Throwable t) {
                 Log.w(TAG, "sample failed", t);

@@ -35,3 +35,7 @@ Tools (apktool 2.12.0, build-tools 34, android-34 android.jar, baksmali 3.0.3) a
 
 Ride journals are written to `Android/data/com.cgs.atvobserver/files/ride_journal/*.csv`
 (readable over USB / `adb pull`).
+
+## Device compatibility (step 3)
+Runtime capability detection for Galaxy J3 (Android 9) / A71 (rooted) / S22 / Razr 40 (Android 16),
+OEM battery-manager steps and the `capabilities.json` report: [`docs/DEVICES.md`](docs/DEVICES.md).
