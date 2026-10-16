@@ -55,7 +55,7 @@ for dp, _, fs in os.walk(root):
                 continue
             op, cls, member = m.groups()
             if helper_dir:
-                if not (cls.startswith('Lcom/cgs/') or cls.startswith('Landroidx/') or cls.startswith('Lkotlinx/')):
+                if not (cls.startswith('Lcom/cgs/') or cls.startswith('Landroidx/') or cls.startswith('Lkotlinx/') or cls.startswith('Lkotlin/')):
                     continue
             elif not cls.startswith('Lcom/cgs/atvobserver/patch/'):
                 continue

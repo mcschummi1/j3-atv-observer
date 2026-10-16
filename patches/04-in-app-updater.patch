@@ -1,0 +1,109 @@
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -5,6 +5,7 @@
+     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+     <uses-permission android:name="android.permission.CAMERA"/>
+     <uses-permission android:name="android.permission.INTERNET"/>
++    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+@@ -26,6 +27,8 @@
+                 <category android:name="android.intent.category.LAUNCHER"/>
+             </intent-filter>
+         </activity>
++        <activity android:configChanges="keyboardHidden|orientation|screenSize" android:exported="false" android:launchMode="singleTask" android:name="com.cgs.atvobserver.patch.UpdateActivity"/>
++        <receiver android:exported="false" android:name="com.cgs.atvobserver.patch.InstallResult"/>
+         <service android:exported="false" android:foregroundServiceType="location|microphone" android:name="com.cgs.atvobserver.service.ObserverForegroundService"/>
+         <service android:enabled="false" android:exported="false" android:name="androidx.camera.core.impl.MetadataHolderService">
+             <meta-data android:name="androidx.camera.core.impl.MetadataHolderService.DEFAULT_CONFIG_PROVIDER" android:value="androidx.camera.camera2.Camera2Config$DefaultProvider"/>
+--- a/smali_classes3/com/cgs/atvobserver/MainActivity.smali
++++ b/smali_classes3/com/cgs/atvobserver/MainActivity.smali
+@@ -857,6 +857,9 @@
+ 
+     invoke-super {p0}, Landroidx/activity/ComponentActivity;->onResume()V
+ 
++    # PATCH: bind the existing main-menu version/update entry to this Activity (weak reference)
++    invoke-static {p0}, Lcom/cgs/atvobserver/patch/UpdaterEntry;->onResume(Landroid/app/Activity;)V
++
+     # PATCH: one-time notification permission + battery-optimisation exemption prompt
+     invoke-static {p0}, Lcom/cgs/atvobserver/patch/ObserverCompat;->onActivityResume(Landroid/app/Activity;)V
+ 
+--- a/smali_classes11/com/cgs/atvobserver/ui/screens/MainMenuScreenKt.smali
++++ b/smali_classes11/com/cgs/atvobserver/ui/screens/MainMenuScreenKt.smali
+@@ -1405,7 +1405,8 @@
+     invoke-static/range {v24 .. v48}, Landroidx/compose/material3/TextKt;->Text--4IGK_g(Ljava/lang/String;Landroidx/compose/ui/Modifier;JJLandroidx/compose/ui/text/font/FontStyle;Landroidx/compose/ui/text/font/FontWeight;Landroidx/compose/ui/text/font/FontFamily;JLandroidx/compose/ui/text/style/TextDecoration;Landroidx/compose/ui/text/style/TextAlign;JIZIILkotlin/jvm/functions/Function1;Landroidx/compose/ui/text/TextStyle;Landroidx/compose/runtime/Composer;III)V
+ 
+     .line 57
+-    const/16 v1, 0xa
++    # PATCH: readable (12sp) update entry in place of the old hard-coded version subtitle
++    const/16 v1, 0xc
+ 
+     invoke-static {v1}, Landroidx/compose/ui/unit/TextUnitKt;->getSp(I)J
+ 
+@@ -1426,9 +1427,13 @@
+     nop
+ 
+     .line 55
+-    const-string v79, "Catalin Garage Standard (CGS) v1.1.6-Mk.I (Build 16)"
+-
+-    const/16 v80, 0x0
++    invoke-static {}, Lcom/cgs/atvobserver/patch/UpdaterEntry;->menuLabel()Ljava/lang/String;
++
++    move-result-object v79
++
++    invoke-static {}, Lcom/cgs/atvobserver/ui/screens/MainMenuScreenKt;->updaterModifier()Landroidx/compose/ui/Modifier;
++
++    move-result-object v80
+ 
+     const/16 v85, 0x0
+ 
+@@ -1460,7 +1465,8 @@
+ 
+     const/16 v102, 0x0
+ 
+-    const v103, 0x1fff2
++    # PATCH: clear the modifier-default bit; preserve the clickable modifier passed in v80
++    const v103, 0x1fff0
+ 
+     invoke-static/range {v79 .. v103}, Landroidx/compose/material3/TextKt;->Text--4IGK_g(Ljava/lang/String;Landroidx/compose/ui/Modifier;JJLandroidx/compose/ui/text/font/FontStyle;Landroidx/compose/ui/text/font/FontWeight;Landroidx/compose/ui/text/font/FontFamily;JLandroidx/compose/ui/text/style/TextDecoration;Landroidx/compose/ui/text/style/TextAlign;JIZIILkotlin/jvm/functions/Function1;Landroidx/compose/ui/text/TextStyle;Landroidx/compose/runtime/Composer;III)V
+ 
+@@ -4758,3 +4764,38 @@
+ 
+     return-void
+ .end method
++
++# PATCH: platform update Activity reached from the existing main-menu subtitle.
++.method private static updaterModifier()Landroidx/compose/ui/Modifier;
++    .locals 5
++
++    sget-object v0, Landroidx/compose/ui/Modifier;->Companion:Landroidx/compose/ui/Modifier$Companion;
++
++    const/4 v1, 0x1
++
++    const-string v2, "Check for updates"
++
++    const/4 v3, 0x0
++
++    invoke-static {}, Lcom/cgs/atvobserver/patch/UpdaterEntry;->click()Lkotlin/jvm/functions/Function0;
++
++    move-result-object v4
++
++    invoke-static {v0, v1, v2, v3, v4}, Landroidx/compose/foundation/ClickableKt;->clickable-XHw0xAI(Landroidx/compose/ui/Modifier;ZLjava/lang/String;Landroidx/compose/ui/semantics/Role;Lkotlin/jvm/functions/Function0;)Landroidx/compose/ui/Modifier;
++
++    move-result-object v0
++
++    const/high16 v1, 0x42400000    # 48.0f dp minimum tap target
++
++    invoke-static {v0, v1}, Landroidx/compose/foundation/layout/SizeKt;->height-3ABfNKs(Landroidx/compose/ui/Modifier;F)Landroidx/compose/ui/Modifier;
++
++    move-result-object v0
++
++    const/high16 v1, 0x3f800000    # 1.0f
++
++    invoke-static {v0, v1}, Landroidx/compose/foundation/layout/SizeKt;->fillMaxWidth(Landroidx/compose/ui/Modifier;F)Landroidx/compose/ui/Modifier;
++
++    move-result-object v0
++
++    return-object v0
++.end method
