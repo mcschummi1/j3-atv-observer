@@ -72,8 +72,16 @@ Details, test output and what a real TFLite implementation would need: [`docs/AI
 **Actions → "Pre-release APK (manual)" → Run workflow** (`workflow_dispatch`). It checks out the
 repo, runs `scripts/build.sh` (tests → decode → patch → helpers → build → zipalign → sign), signs
 with the universal key from secrets, and publishes a GitHub **pre-release** `v1.1.7-Mk1-pocketfix-ci.<run>`
-with the APK and its SHA-256. `versionCode = 100 + run number`, so every workflow build is newer
-than the previous one.
+with the APK and its SHA-256. `versionCode = 100 + run number` (the owner-pinned `v1.1.7` release has
+versionCode 17), so every workflow build is newer than the previous one; the release notes carry a
+machine-readable `J3ATV-VersionCode: <n>` line that the in-app updater reads.
+
+## In-app updater
+The main menu's version line shows the installed version and, when tapped, opens an update screen that
+checks the public GitHub releases (pre-releases included), downloads the APK with progress, verifies the
+`.sha256` asset and installs through a `PackageInstaller` session after explicit user confirmation, with a
+clear message for signature conflicts. Release `versionCode` rule, verification steps, limits:
+[`docs/IN_APP_UPDATER.md`](docs/IN_APP_UPDATER.md). **Not tested on a physical device or emulator.**
 
 ## Universal signing key
 * Keystore: PKCS12, RSA 4096, SHA384withRSA, validity 10000 days (until 2054-03-03),
@@ -99,5 +107,5 @@ to update an app with a different signing certificate, so:
 ## Verification status
 Static checks only: the APK rebuilds, zipaligns, `apksigner verify` passes (v3 scheme; see Building), `aapt2 dump
 badging` parses it, `tools/verify_refs.py` resolves every cross-boundary smali reference, and the
-filter's host unit tests pass. **It has not been installed or run on any physical device**
+filter / recorder / updater host unit tests pass. **It has not been installed or run on any physical device**
 (Galaxy J3 / A71 / S22 / Razr 40) or emulator.
